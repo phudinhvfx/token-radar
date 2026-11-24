@@ -17,7 +17,6 @@
   var watchSet = {};
   (DATA.watchlist || []).forEach(function (s) { watchSet[s] = true; });
   function isWatch(r) { return !!watchSet[r.slug]; }
-  function isWatch(r) { return r.tvl_usd >= DATA.floor_usd; }
 
   function fmtUsd(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
@@ -66,10 +65,12 @@
     });
     var key = state.sort;
     rows.sort(function (a, b) {
-      var va = key === 'implied' ? a.implied_value_usd : key === 'tvl' ? a.tvl_usd
+      var va = key === 'implied' ? a.implied_value_usd : key === 'expected' ? a.expected_value_usd
+        : key === 'tvl' ? a.tvl_usd
         : key === 'growth' ? (a.change_7d === null ? -999 : a.change_7d)
         : key === 'age' ? (a.age_days === null ? -1 : a.age_days) : a.rank;
-      var vb = key === 'implied' ? b.implied_value_usd : key === 'tvl' ? b.tvl_usd
+      var vb = key === 'implied' ? b.implied_value_usd : key === 'expected' ? b.expected_value_usd
+        : key === 'tvl' ? b.tvl_usd
         : key === 'growth' ? (b.change_7d === null ? -999 : b.change_7d)
         : key === 'age' ? (b.age_days === null ? -1 : b.age_days) : b.rank;
       return (va - vb) * state.dir;
@@ -84,8 +85,8 @@
       el('p', { 'class': 'note' }, (r.category || 'Uncategorised') + ' · ' + (r.chains || []).join(', ') +
         ' · TVL ' + fmtUsd(r.tvl_usd) + ' · 7d ' + fmtPct(r.change_7d) + ' · listed ' +
         (r.listed_at || 'unknown') + ' (' + fmtAge(r.age_days) + ') · ' +
-        (isWatch(r) ? 'on the $50M watchlist' : 'early find below the $50M floor') + ' · records no token.'),
-      el('h3', {}, 'Implied value: ' + fmtUsd(r.implied_value_usd)),
+        (isWatch(r) ? 'on the $50M watchlist' : 'beyond the watchlist') + ' · records no token.'),
+      el('h3', {}, 'Implied value: ' + fmtUsd(r.implied_value_usd) + ' · Expected value: ' + fmtUsd(r.expected_value_usd)),
       el('div', { 'class': 'math' },
         el('div', {}, 'implied = TVL × category multiple × growth × breadth × maturity'),
         el('table', {}, el('tbody', {},
@@ -94,7 +95,14 @@
           el('tr', {}, el('td', {}, 'Growth (' + fmtPct(m.growth_pct) + ' in 7 days, clamped −60% to +120%)'), el('td', { 'class': 'num' }, '× ' + m.growth_multiplier.toFixed(2))),
           el('tr', {}, el('td', {}, 'Breadth (' + (r.chains || []).length + ' chain' + ((r.chains || []).length === 1 ? '' : 's') + ')'), el('td', { 'class': 'num' }, '× ' + m.breadth_multiplier.toFixed(2))),
           el('tr', {}, el('td', {}, 'Maturity (' + fmtAge(m.age_days) + ' with no token)'), el('td', { 'class': 'num' }, '× ' + m.maturity_multiplier.toFixed(2))),
-          el('tr', {}, el('td', {}, 'Implied value'), el('td', { 'class': 'num' }, fmtUsd(r.implied_value_usd)))))),
+          el('tr', {}, el('td', {}, 'Implied value'), el('td', { 'class': 'num' }, fmtUsd(r.implied_value_usd))),
+          el('tr', {}, el('td', {}, 'Launch odds (share of protocols this old that already record a token)'), el('td', { 'class': 'num' }, (r.launch_odds * 100).toFixed(1) + '%')),
+          el('tr', {}, el('td', {}, 'Expected value (implied × odds)'), el('td', { 'class': 'num' }, fmtUsd(r.expected_value_usd)))))),
+      el('h3', {}, 'Farm verdict: ' + r.verdict),
+      el('p', {}, 'Farming costs about $' + r.farm_cost_usd + ' ($25 of gas plus the yield forgone on a $' + r.min_capital_usd +
+        ' deposit), so the airdrop only needs to be worth $' + r.break_even_usd + ' — about ' + r.break_even_pct +
+        '% of the expected launch value — to break even. Minimum capital: $' + r.min_capital_usd +
+        '. The verdict is relative to this board: the top third by expected value per farming dollar is FARM, the middle third THIN, the bottom third SKIP.'),
       el('h3', {}, 'How to farm it'),
       el('ol', { 'class': 'farm' }, r.farm_steps.map(function (s) { return el('li', {}, s); })),
       el('p', { 'class': 'note' }, 'This is the entry\u2019s own claim from the snapshot dated ' + DATA.as_of +
@@ -113,9 +121,16 @@
       el('div', { 'class': 'stats' },
         el('div', { 'class': 'stat' }, el('b', {}, String(DATA.board_size)), el('span', {}, 'protocols ranked')),
         el('div', { 'class': 'stat' }, el('b', {}, String(DATA.watchlist_size)), el('span', {}, 'on the $50M watchlist')),
-        el('div', { 'class': 'stat' }, el('b', {}, String(DATA.early_size)), el('span', {}, 'early finds below floor')),
+        el('div', { 'class': 'stat' }, el('b', {}, String(DATA.early_size)), el('span', {}, 'beyond the watchlist')),
         el('div', { 'class': 'stat' }, el('b', {}, fmtUsd(DATA.rows[0].implied_value_usd)), el('span', {}, '#1 implied value')),
-        el('div', { 'class': 'stat' }, el('b', {}, DATA.as_of), el('span', {}, 'snapshot date'))));
+        el('div', { 'class': 'stat' }, el('b', {}, DATA.as_of), el('span', {}, 'snapshot date'))),
+      el('div', { 'class': 'strip' },
+        'Blind-tested on ' + DATA.blind_test.live_n + ' live tokens: leave-one-out median error ×' + DATA.blind_test.loo.median_factor +
+        ' · ' + Math.round(DATA.blind_test.loo.within_2x * 100) + '% within 2× · Spearman ' + DATA.blind_test.spearman +
+        ' · All ' + DATA.accounting.total + ' protocols accounted for: ' + DATA.accounting.ranked + ' ranked, ' +
+        DATA.accounting.live_shown + ' live shown, ' + DATA.accounting.live_unshown + ' live unshown, ' +
+        DATA.accounting.token_no_mcap + ' token-recorded without a market cap, ' + DATA.accounting.pretoken_non_subject +
+        ' pre-token but not genuine subjects.'));
     wrap.appendChild(hero);
 
     var tabs = el('div', { 'class': 'tabs' });
@@ -142,7 +157,43 @@
             return el('tr', {}, el('td', {}, m.category), el('td', { 'class': 'num' }, '× ' + m.multiple.toFixed(2)), el('td', { 'class': 'num' }, String(m.n)));
           }))),
         el('p', { 'class': 'note' }, 'Global median multiple: × ' + DATA.global_multiple.toFixed(2) +
-          '. Categories with fewer than 3 live protocols use it. Source: ' + DATA.source + '.'));
+          '. Categories with fewer than 3 live protocols use it. Source: ' + DATA.source + '.'),
+        el('h3', {}, 'Blind test: the same formula on live tokens'),
+        el('p', {}, 'Every live protocol that carries a market cap is predicted from its TVL and compared with the real one. ' +
+          'Leave-one-out means each protocol is predicted from comparables that exclude it, so it never prices itself.'),
+        el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, 'Test'), el('th', { 'class': 'num' }, 'Median error'), el('th', { 'class': 'num' }, 'p90'), el('th', { 'class': 'num' }, 'Within 2×'))),
+          el('tbody', {},
+            el('tr', {}, el('td', {}, 'Leave-one-out (n=' + DATA.blind_test.live_n + ')'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.loo.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.loo.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.loo.within_2x * 100) + '%')),
+            el('tr', {}, el('td', {}, 'Split half by slug: fit even, test odd'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.split_even_odd.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.split_even_odd.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.split_even_odd.within_2x * 100) + '%')),
+            el('tr', {}, el('td', {}, 'Split half by slug: fit odd, test even'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.split_odd_even.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.split_odd_even.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.split_odd_even.within_2x * 100) + '%')),
+            el('tr', {}, el('td', {}, 'Older-to-newer by listing date (cutoff ' + DATA.blind_test.older_newer_cutoff + ', fit n=' + DATA.blind_test.older_newer_fit_n + ', test n=' + DATA.blind_test.older_newer_test_n + ')'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.older_newer.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.older_newer.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.older_newer.within_2x * 100) + '%')),
+            el('tr', {}, el('td', {}, 'Newer-to-older'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.newer_older.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.newer_older.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.newer_older.within_2x * 100) + '%')))),
+        el('p', {}, 'The model is unbiased at the middle — median predicted / actual ' + DATA.blind_test.loo.median_ratio +
+          ' — but noisy: only ' + Math.round(DATA.blind_test.loo.within_2x * 100) + '% of live tokens land within 2×, and it orders live tokens with Spearman ' +
+          DATA.blind_test.spearman + ' (Pearson on log10 ' + DATA.blind_test.pearson_log + '). Treat the implied values as an ordering, not a price.'),
+        el('h3', {}, 'What each term is worth'),
+        el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, 'Model'), el('th', { 'class': 'num' }, 'Median error'))),
+          el('tbody', {}, DATA.blind_test.ablations.map(function (a) {
+            return el('tr', {}, el('td', {}, a.name), el('td', { 'class': 'num' }, '×' + a.stats.median_factor));
+          }).concat([
+            el('tr', {}, el('td', {}, 'Full model'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.loo.median_factor)),
+            el('tr', {}, el('td', {}, 'Unclamped multiples (diagnostic — the clamp helps, so it stays)'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.unclamped_loo.median_factor))]))),        el('p', { 'class': 'note' }, 'Walk-forward on TVL history is impossible here: the snapshot holds one date, so there is no past TVL to walk forward from. The older-to-newer split above is the time test instead.'),
+        el('h3', {}, 'Launch odds by age'),
+        el('p', {}, 'The share of protocols in each age bucket that already record a token. Expected value is implied value × odds. Protocols with no listing date take the all-protocol rate.'),
+        el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, 'Age bucket'), el('th', { 'class': 'num' }, 'Protocols'), el('th', { 'class': 'num' }, 'Already record a token'), el('th', { 'class': 'num' }, 'Odds'))),
+          el('tbody', {}, DATA.odds.buckets.map(function (b) {
+            return el('tr', {}, el('td', {}, b.bucket), el('td', { 'class': 'num' }, String(b.n)), el('td', { 'class': 'num' }, String(b.launched)), el('td', { 'class': 'num' }, (b.rate * 100).toFixed(1) + '%'));
+          }).concat([el('tr', {}, el('td', {}, 'All protocols'), el('td', { 'class': 'num' }, String(DATA.odds.overall_n)), el('td', { 'class': 'num' }, String(DATA.odds.overall_launched)), el('td', { 'class': 'num' }, (DATA.odds.overall_rate * 100).toFixed(1) + '%'))]))),
+        el('h3', {}, 'Accounting for all ' + DATA.accounting.total + ' protocols'),
+        el('table', {}, el('tbody', {},
+          el('tr', {}, el('td', {}, 'Ranked on this board'), el('td', { 'class': 'num' }, String(DATA.accounting.ranked))),
+          el('tr', {}, el('td', {}, 'Live tokens shown separately (top ' + DATA.accounting.live_shown + ' by market cap)'), el('td', { 'class': 'num' }, String(DATA.accounting.live_shown))),
+          el('tr', {}, el('td', {}, 'Live tokens not shown'), el('td', { 'class': 'num' }, String(DATA.accounting.live_unshown))),
+          el('tr', {}, el('td', {}, 'Record a token but carry no market cap'), el('td', { 'class': 'num' }, String(DATA.accounting.token_no_mcap))),
+          el('tr', {}, el('td', {}, 'Pre-token but not genuine subjects (wrapped / staked / bridged products, exchange products, versioned names, CEX and bridge categories)'), el('td', { 'class': 'num' }, String(DATA.accounting.pretoken_non_subject))),
+          el('tr', {}, el('td', {}, 'Total'), el('td', { 'class': 'num' }, String(DATA.accounting.total))))),
+        el('p', { 'class': 'note' }, 'The board ranks every genuine pre-token subject in the snapshot, including ' + DATA.above_floor_new +
+          ' above the $50M floor the watchlist leaves out. One limit stays: the snapshot carries no parent protocol, so a subject whose parent\u2019s token trades could still slip in. The full method note ships as METHOD.md in the dashboard.'));
       wrap.appendChild(box);
       app.appendChild(wrap);
       return;
@@ -173,7 +224,7 @@
       el('select', { onchange: function (e) { state.category = e.target.value; render(); } },
         cats.map(function (c) { var o = el('option', { value: c }, c === 'all' ? 'All categories' : c); if (state.category === c) o.selected = true; return o; })),
       el('select', { onchange: function (e) { var v = e.target.value; state.sort = v; state.dir = v === 'rank' ? 1 : -1; render(); } },
-        [['implied', 'Sort: implied value'], ['tvl', 'Sort: TVL'], ['growth', 'Sort: 7-day growth'], ['age', 'Sort: age'], ['rank', 'Sort: rank']].map(function (s) {
+        [['implied', 'Sort: implied value'], ['expected', 'Sort: expected value'], ['tvl', 'Sort: TVL'], ['growth', 'Sort: 7-day growth'], ['age', 'Sort: age'], ['rank', 'Sort: rank']].map(function (s) {
           var o = el('option', { value: s[0] }, s[1]); if (state.sort === s[0]) o.selected = true; return o; })),
       el('label', {}, el('input', { type: 'checkbox', checked: state.watchOnly ? true : undefined,
         onchange: function (e) { state.watchOnly = e.target.checked; render(); } }), 'Watchlist only'));
@@ -191,7 +242,8 @@
       el('thead', {}, el('tr', {},
         el('th', {}, '#'), el('th', {}, 'Protocol'), el('th', {}, 'Category'),
         el('th', { 'class': 'num' }, 'TVL'), el('th', { 'class': 'num' }, '7d'),
-        el('th', { 'class': 'num' }, 'Age'), el('th', { 'class': 'num' }, 'Implied value'))),
+        el('th', { 'class': 'num' }, 'Age'), el('th', { 'class': 'num' }, 'Implied value'),
+        el('th', { 'class': 'num' }, 'Expected'), el('th', {}, 'Verdict'))),
       el('tbody', {}, rows.slice(0, 100).map(function (r) {
         var g = r.change_7d;
         return el('tr', {
@@ -204,7 +256,9 @@
           el('td', { 'class': 'num' }, fmtUsd(r.tvl_usd)),
           el('td', { 'class': 'num ' + (g === null ? '' : g >= 0 ? 'up' : 'down') }, fmtPct(g)),
           el('td', { 'class': 'num' }, fmtAge(r.age_days)),
-          el('td', { 'class': 'num' }, el('b', {}, fmtUsd(r.implied_value_usd))));
+          el('td', { 'class': 'num' }, el('b', {}, fmtUsd(r.implied_value_usd))),
+          el('td', { 'class': 'num' }, fmtUsd(r.expected_value_usd)),
+          el('td', {}, el('span', { 'class': 'verdict v-' + r.verdict.toLowerCase() }, r.verdict)));
       })));
     wrap.appendChild(table);
     if (rows.length > 100) wrap.appendChild(el('p', { 'class': 'count' }, 'First 100 rows shown — use search or a category filter to see the rest.'));
