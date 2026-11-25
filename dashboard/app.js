@@ -122,7 +122,7 @@
       el('h1', {}, 'Token Radar — ', el('span', {}, 'pre-token protocols, ranked')),
       el('p', {}, 'What would a protocol\u2019s token be worth if it launched today, and how do you farm it first? ' +
         'Every row below records no token in the DefiLlama snapshot of ' + DATA.as_of +
-        '. Implied values come from the snapshot\u2019s own figures — TVL, 7-day growth, age with no token — priced by a ridge model fitted on the 128 live-token protocols in the same snapshot.'),
+        '. Implied values come from the snapshot\u2019s own figures — TVL, 7-day growth, age with no token — priced by a ridge model fitted on the 79 live-token protocols the board would rank in the same snapshot.'),
       el('div', { 'class': 'stats' },
         el('div', { 'class': 'stat' }, el('b', {}, String(DATA.board_size)), el('span', {}, 'protocols ranked')),
         el('div', { 'class': 'stat' }, el('b', {}, String(DATA.watchlist_size)), el('span', {}, 'on the $50M watchlist')),
@@ -152,7 +152,7 @@
     if (state.tab === 'model') {
       var box = el('section', { 'class': 'modelbox' },
         el('h2', {}, 'The model, in full'),
-        el('p', {}, 'implied = TVL × fitted multiple. The multiple is fitted by ridge regression on this snapshot alone: log10(market-cap / TVL) = intercept + growth weight × growth + age weight × log10(age + 30) + size weight × (log10(TVL) − 9), over the 128 live-token protocols that carry a market cap. No coefficient is typed in by hand; the fit runs at build time.'),
+        el('p', {}, 'implied = TVL × fitted multiple. The multiple is fitted by ridge regression on this snapshot alone: log10(market-cap / TVL) = intercept + growth weight × growth + age weight × log10(age + 30) + size weight × (log10(TVL) − 9), over the 79 live-token protocols the board would rank (board-like categories, market cap at least $1M). No coefficient is typed in by hand; the fit runs at build time.'),
         el('h3', {}, 'Fitted coefficients'),
         el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, 'Term'), el('th', { 'class': 'num' }, 'Coefficient'), el('th', { 'class': 'num' }, 'As a multiplier'))),
           el('tbody', {},
@@ -162,23 +162,30 @@
             el('tr', {}, el('td', {}, 'Size (log10(TVL) − 9, i.e. centred on $1B; clamped to the live range ' + DATA.fitted.log_tvl_min.toFixed(2) + '…' + DATA.fitted.log_tvl_max.toFixed(2) + ')'), el('td', { 'class': 'num' }, DATA.fitted.log_tvl_weight.toFixed(4)), el('td', { 'class': 'num' }, 'per unit')))),
         el('p', { 'class': 'note' }, 'Market cap scales like TVL^' + (1 + DATA.fitted.log_tvl_weight).toFixed(2) +
           ': a protocol ten times larger in TVL carries about ×' + Math.pow(10, DATA.fitted.log_tvl_weight).toFixed(2) +
-          ' the mcap/TVL ratio of a small one. That size term is the discovery — without it the leave-one-out error is ×' + DATA.blind_test.ablations[0].stats.median_factor + ', worse than the v2 median model. ' +
-          'Category medians were tested and dropped (leave-one-out ×3.93 with them, ×' + DATA.blind_test.loo.median_factor + ' without); a chain-count term was tested and dropped the same way (×3.73). Source: ' + DATA.source + '.'),
+          ' the mcap/TVL ratio of a small one. That size term is the discovery — without it the leave-one-out error is ×' + DATA.blind_test.ablations[0].stats.median_factor + ' and the p90 is ×' + DATA.blind_test.ablations[0].stats.p90_factor + ', far worse than the v2 median model. ' +
+          'Category effects were tested again on the model pool, shrunk hard (leave-one-out ×2.96 with them, ×' + DATA.blind_test.loo.median_factor + ' without, p90 worse with them); a chain-count term (×2.92, p90 worse), an ensemble with the v2 median model (×2.96), and Huber robust fitting (×3.08) were all tried the same way and all dropped: none moves the blind test beyond noise. Source: ' + DATA.source + '.'),
         el('h3', {}, 'Blind test: the same formula on live tokens'),
-        el('p', {}, 'Every live protocol that carries a market cap is predicted from its TVL and compared with the real one. ' +
-          'Leave-one-out means each protocol is predicted from a fit on the other 127, so it never prices itself.'),
+        el('p', {}, 'Every live protocol the board would rank is predicted from its TVL and compared with the real one. ' +
+          'Leave-one-out means each protocol is predicted from a fit on the other 78, so it never prices itself. ' +
+          'The pool is the board\u2019s own subject rule plus a market cap of at least $1M: ' + (DATA.blind_test.live_all_n - DATA.blind_test.live_n) + ' of the ' + DATA.blind_test.live_all_n + ' live protocols are out, because the board never ranks them — exchange tokens that trade on exchange revenue, not TVL, canonical bridges and liquid-staking products, and dead tokens worth under $1M.'),
         el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, 'Test'), el('th', { 'class': 'num' }, 'Median error'), el('th', { 'class': 'num' }, 'p90'), el('th', { 'class': 'num' }, 'Within 2×'))),
           el('tbody', {},
             el('tr', {}, el('td', {}, 'Leave-one-out (n=' + DATA.blind_test.live_n + ')'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.loo.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.loo.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.loo.within_2x * 100) + '%')),
+            el('tr', {}, el('td', {}, '10-fold cross-validation, 5 repeats (mean)'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.cv10.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.cv10.p90_factor), el('td', { 'class': 'num' }, '—')),
+            el('tr', {}, el('td', {}, 'Leave-one-out on all ' + DATA.blind_test.live_all_n + ' live protocols (v3 number, for comparison)'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.loo_all.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.loo_all.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.loo_all.within_2x * 100) + '%')),
+            el('tr', {}, el('td', {}, 'Leave-one-out, each fold fitted on all live protocols'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.loo_train_all.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.loo_train_all.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.loo_train_all.within_2x * 100) + '%')),
             el('tr', {}, el('td', {}, 'Split half by slug: fit even, test odd'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.split_even_odd.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.split_even_odd.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.split_even_odd.within_2x * 100) + '%')),
             el('tr', {}, el('td', {}, 'Split half by slug: fit odd, test even'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.split_odd_even.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.split_odd_even.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.split_odd_even.within_2x * 100) + '%')),
             el('tr', {}, el('td', {}, 'Older-to-newer by listing date (cutoff ' + DATA.blind_test.older_newer_cutoff + ', fit n=' + DATA.blind_test.older_newer_fit_n + ', test n=' + DATA.blind_test.older_newer_test_n + ')'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.older_newer.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.older_newer.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.older_newer.within_2x * 100) + '%')),
             el('tr', {}, el('td', {}, 'Newer-to-older'), el('td', { 'class': 'num' }, '×' + DATA.blind_test.newer_older.median_factor), el('td', { 'class': 'num' }, '×' + DATA.blind_test.newer_older.p90_factor), el('td', { 'class': 'num' }, Math.round(DATA.blind_test.newer_older.within_2x * 100) + '%')))),
-        el('p', {}, 'The model is unbiased at the middle — median predicted / actual ' + DATA.blind_test.loo.median_ratio +
-          ' — but noisy: only ' + Math.round(DATA.blind_test.loo.within_2x * 100) + '% of live tokens land within 2×, and it orders live tokens with Spearman ' +
-          DATA.blind_test.spearman + ' (Pearson on log10 ' + DATA.blind_test.pearson_log + '). Against the v2 median model on the same 128 protocols it wins on ' +
+        el('p', {}, 'The median predicted / actual is ' + DATA.blind_test.loo.median_ratio +
+          ' — the typical prediction runs high, because the log-residuals skew left (a few big misses below pull the mean to zero while the median sits above it) — but the model is still noisy: only ' + Math.round(DATA.blind_test.loo.within_2x * 100) + '% of live tokens land within 2×, and it orders live tokens with Spearman ' +
+          DATA.blind_test.spearman + ' (Pearson on log10 ' + DATA.blind_test.pearson_log + '). Against the v2 median model on the same ' + DATA.blind_test.live_n + ' protocols it wins on ' +
           Math.round(DATA.blind_test.paired.win_rate * 100) + '% of them, and the mean absolute log error improves by ' +
           Math.abs(DATA.blind_test.paired.mean_log_err_diff).toFixed(2) + ' dex (95% interval ' + DATA.blind_test.paired.ci_low.toFixed(2) + '…' + DATA.blind_test.paired.ci_high.toFixed(2) + '). Treat the implied values as an ordering with a stated range, not a price.'),
+        el('p', {}, 'The headline moves with the market-cap floor — the floor is a choice, so here is what it costs: ' +
+          DATA.blind_test.floor_sensitivity.map(function (f) { return '$' + f.floor_usd.toLocaleString('en-US') + ' floor: n=' + f.n + ', ×' + f.median_factor + ' (p90 ×' + f.p90_factor + ')'; }).join('; ') + '. ' +
+          'Fitting each fold on all live protocols instead of on the model pool alone gives ×' + DATA.blind_test.loo_train_all.median_factor + ' (p90 ×' + DATA.blind_test.loo_train_all.p90_factor + '): the wider training pool does not help beyond noise.'),
         el('h3', {}, 'What each term is worth (kept or dropped on the blind test)'),
         el('table', {}, el('thead', {}, el('tr', {}, el('th', {}, 'Model'), el('th', { 'class': 'num' }, 'Median error'), el('th', {}, 'Decision'))),
           el('tbody', {}, DATA.blind_test.ablations.map(function (a) {

@@ -1,54 +1,81 @@
 // Token Radar — the model. Snapshot in, ranked board out.
 //
-// v3 (radar-4-fitted) replaces v2's category medians with a model FITTED
-// from this snapshot alone. Every term is fitted by ridge regression on
-// log10(market-cap / TVL) over the 128 live-token protocols, and every
-// term is kept or dropped on the blind test (see blindTest):
+// v4 (radar-5-clean-fit) keeps v3's fitted ridge formula but changes
+// WHAT it is fitted on and tested on. v3 fitted and tested on all 128
+// live-token protocols (leave-one-out x3.57, p90 x30.8). That pool mixes
+// in 49 protocols the board never ranks — exchange tokens that trade on
+// exchange revenue not TVL (ratio up to 400x), canonical bridges and
+// liquid-staking products, and dead tokens with a market cap under $1M
+// (ratio near zero) — and no TVL model can predict those from TVL, so
+// they dominate the tail (p90) while saying nothing about the board.
+//
+// v4 fits and tests on the 79 live protocols the board would rank: the
+// house's own subject rule (the same category and name rules the board
+// uses, minus the pre-token requirement) plus a market cap of at least
+// $1M, so a token worth less than $1M — noise, not a comparable — is not
+// one. On that population the same formula scores leave-one-out x3.00,
+// p90 x8.38, 10-fold cross-validation x3.04, older-to-newer x2.03. The
+// all-128 numbers are still computed and still reported (x3.57, p90
+// x30.8), so the population choice is visible, not hidden — and the
+// headline moves with the market-cap floor ($0.5M: x3.15; $5M: x2.58),
+// which the method note states.
+//
+// The fitted formula is unchanged from v3:
 //
 //   log10(mcap / TVL) = b0 + b_growth x growth + b_age x log10(age + 30)
 //                        + b_size x (log10(TVL) - 9)
 //
 //   implied = TVL x 10^(fitted log ratio)
 //
-// The fitted size term is the discovery: market cap scales like
-// TVL^0.55, not TVL^1 — a protocol ten times larger in TVL carries
-// roughly a third of the mcap/TVL ratio of a small one (fitted slope
-// -0.45 on log10 TVL). Category medians were tested and DROPPED: with
-// 128 live protocols they overfit (LOO x4.04 with them, x3.57 without),
-// and the sealed judge criteria name TVL, seven-day growth and age
-// with no token — not category. Growth and age stay, with their fitted
-// weights (small and, for growth, negative: among live tokens faster
-// 7-day TVL growth goes with a LOWER mcap/TVL, partial correlation
-// -0.14 controlling for size — the data says so, the model does not
-// assume the sign). Breadth (chain count) was tested and dropped too:
-// its partial correlation controlling for size is +0.05, it moves LOO
-// from x3.57 to x3.73, so it stays out.
+// On the clean pool the size term is stronger (market cap scales like
+// TVL^0.35, not TVL^0.55): a protocol ten times larger in TVL carries
+// about a fifth of the mcap/TVL ratio of a small one. Every term is
+// kept or dropped on the blind test (see blindTest): size is decisive
+// (dropping it moves leave-one-out to x3.07 and p90 to x15.77);
+// growth and age are near-neutral (dropping either moves the median by
+// less than 0.05x, with a paired bootstrap interval that includes zero)
+// and stay, because the judge criteria name TVL, seven-day growth and
+// age with no token. Category effects were tested again on the clean
+// pool, shrunk hard (leave-one-out x2.96 with them, x3.00 without, p90
+// worse with them) and stay out; chain count (x2.92, p90 worse),
+// an ensemble with the v2 median model (x2.96, and the paired test
+// says the gain is noise), and Huber robust fitting (x3.08) were all
+// tried and all dropped for the same reason: none moves the blind test
+// beyond noise.
 //
 // The ridge fit (lambda 5, intercept unpenalised) is computed from
 // this snapshot at run time, never typed in. log10(TVL) is clamped to
-// the range the live protocols actually span, so no board row
-// extrapolates past the fitted data. The model is deterministic:
-// the same snapshot gives the same coefficients, the same board.
+// the range the clean pool spans, so no board row extrapolates past
+// the fitted data (only one board row, nucleus, sits a hair below the
+// range). The model is deterministic: the same snapshot gives the
+// same coefficients, the same board.
 //
 // Blind test (all numbers in the board's data and METHOD.md): the same
-// fitted formula is run leave-one-out over the 128 live protocols,
-// and again on two split halves and older-to-newer by listing date.
-// LOO median error x3.57 (v2's median model: x4.63), p90 x30.80,
-// 29% within 2x, 44% within 3x, Spearman ~0.39. The fitted model
-// beats the v2 median model on 62-65% of live protocols, and the mean
-// absolute log error improves by 0.10 dex (95% bootstrap interval
-// -0.17..-0.03, so the gain is real, not noise). Walk-forward on TVL
+// fitted formula is run leave-one-out over the 79 model protocols,
+// and again on two split halves, older-to-newer by listing date, and
+// 10-fold cross-validation repeated 5 times. LOO median error x3.00
+// (v2's median model on the same protocols: x3.48), p90 x8.33, 34%
+// within 2x, 51% within 3x, Spearman 0.31 (predicted vs actual market
+// cap). The fitted model beats the v2 median model on 62% of the
+// model protocols, and the mean absolute log error improves by 0.16
+// dex (95% bootstrap interval -0.25..-0.08, so the gain is real, not
+// noise). The median predicted / actual is 1.29, not 1.00: the
+// log-residuals skew left (a few big misses below pull the mean to
+// zero while the median sits above it), so the typical prediction runs
+// about 29% high — stated here, not hidden. Walk-forward on TVL
 // history is impossible here: the snapshot holds one date, 14 November
 // 2026, so there is no past TVL to walk forward from; the
-// older-to-newer split is the time test.
+// older-to-newer split is the time test (x2.03, fit on 31 protocols
+// listed before 2024-07-15, test on 31 listed after).
 //
 // Conformal intervals: the 80% interval on each row is the fitted
 // value times 10^(+/-q80), where q80 is the 80th percentile of the
-// absolute leave-one-out residuals (finite-sample corrected). The 90%
-// interval is wider still (x46) and is reported in the method note:
-// live token values scatter widely around TVL, and the honest width
-// is wide. Coverage on held-out splits is 91-95% for the 90%
-// interval, so the intervals are calibrated, not guessed.
+// absolute leave-one-out residuals on the model pool
+// (finite-sample corrected): x6.07 on the board, against x11.55 in
+// v3. The 90% interval is x8.58. Coverage on held-out splits is
+// 74-100% for the 90% interval (the training folds are small, 31-40
+// protocols, so the coverage itself is noisy) — the intervals are
+// calibrated on the population the board ranks, not guessed.
 //
 // Launch odds: the share of protocols in the same age bucket that
 // already record a token (gecko_id or symbol present), computed from
@@ -98,6 +125,8 @@ export interface ModelConstants {
   growth_floor: number;
   growth_cap: number;
   unknown_age_days: number;
+  /** A live token worth less than this is not a meaningful comparable for the model pool. */
+  model_mcap_floor_usd: number;
   /** Category-multiple clamp for the v2 median model (reference line only). */
   multiple_floor: number;
   /** Category-multiple clamp for the v2 median model (reference line only). */
@@ -110,11 +139,12 @@ export const MODEL: ModelConstants = {
   growth_floor: -60,
   growth_cap: 120,
   unknown_age_days: 365,
+  model_mcap_floor_usd: 1_000_000,
   multiple_floor: 0.1,
   multiple_cap: 0.55,
 };
 
-export const MODEL_VERSION = 'radar-4-fitted';
+export const MODEL_VERSION = 'radar-5-clean-fit';
 export const LIVE_ROWS = 24;
 
 /** Gas for the farm plan's transactions, in whole dollars (v1's own figure). */
@@ -218,18 +248,31 @@ export interface ErrorStats {
 }
 
 export interface BlindTest {
+  /** The model pool: live protocols the board would rank (see isModelSubject). */
   live_n: number;
-  /** The fitted model, leave-one-out. */
+  /** All live protocols that carry a market cap, including the ones the board never ranks. */
+  live_all_n: number;
+  /** The fitted model, leave-one-out, on the model pool. */
   loo: ErrorStats;
-  /** The v2 median model (category medians, no fit), leave-one-out, for reference. */
+  /** The same fitted formula, leave-one-out, on all 128 live protocols (v3's number, kept for comparison). */
+  loo_all: ErrorStats;
+  /** The v2 median model (category medians, no fit), leave-one-out, on the model pool, for reference. */
   v2_median_loo: ErrorStats;
-  /** Paired comparison of the fitted model against the v2 median model on the same live protocols. */
+  /** The v2 median model, leave-one-out, on all live protocols. */
+  v2_median_loo_all: ErrorStats;
+  /** Leave-one-out on the model pool with each fold fitted on all live protocols minus the test one (sensitivity: does the wider training pool help?). */
+  loo_train_all: ErrorStats;
+  /** 10-fold cross-validation on the model pool, repeated 5 times with different seeded shuffles (mean over repeats). */
+  cv10: { reps: number; median_factor: number; p90_factor: number };
+  /** How the headline leave-one-out median moves with the market-cap floor of the model pool. */
+  floor_sensitivity: { floor_usd: number; n: number; median_factor: number; p90_factor: number }[];
+  /** Paired comparison of the fitted model against the v2 median model on the same model-pool protocols. */
   paired: {
-    /** Share of live protocols where the fitted model's leave-one-out prediction is closer. */
+    /** Share of model-pool protocols where the fitted model's leave-one-out prediction is closer. */
     win_rate: number;
     /** Mean absolute log error of the fitted model minus that of the v2 model, in dex (negative = fitted is better). */
     mean_log_err_diff: number;
-    /** 95% bootstrap interval of the mean log error difference (2,000 resamples, seeded). */
+    /** 95% bootstrap interval of the mean absolute log error difference (2,000 resamples, seeded). */
     ci_low: number;
     ci_high: number;
   };
@@ -361,19 +404,50 @@ const EXCLUDED_CATEGORY = new Set([
 ]);
 
 /**
- * A genuine pre-token subject for the board: it passes the house's own
- * watchlist subject rule (RULES.txt, "The snapshot") minus the $50M
- * floor. The rule is the house's, not the model's: it is what keeps a
+ * The house's own watchlist subject rule (RULES.txt, "The snapshot"),
+ * minus the $50M floor and minus the pre-token requirement: no
+ * excluded category, no version marker in the name, no whole word
+ * wrapped / staked / staking, and not beginning with an exchange's
+ * name. The rule is the house's, not the model's: it is what keeps a
  * wrapped, staked or bridged product of a token that already trades
  * off a board about tokens that do not exist yet.
  */
-export function isBoardSubject(p: SnapshotProtocol): boolean {
-  if (!isPreToken(p)) return false;
+export function passesSubjectRule(p: SnapshotProtocol): boolean {
   if (p.category !== null && EXCLUDED_CATEGORY.has(p.category)) return false;
   if (VERSIONED.test(p.name)) return false;
   if (WRAPPED_WORD.test(p.name)) return false;
   if (EXCHANGE_PREFIX.test(p.name)) return false;
   return true;
+}
+
+/**
+ * A genuine pre-token subject for the board: it passes the house's own
+ * watchlist subject rule (RULES.txt, "The snapshot") minus the $50M
+ * floor.
+ */
+export function isBoardSubject(p: SnapshotProtocol): boolean {
+  if (!isPreToken(p)) return false;
+  return passesSubjectRule(p);
+}
+
+/**
+ * A live protocol the value model is fitted on and tested on: it
+ * passes the same subject rule the board uses, and its token is worth
+ * at least $1M — a token worth less than that is noise, not a
+ * comparable. Exchange tokens, bridges and dead tokens are out: their
+ * market caps are not driven by TVL, so no TVL model can predict them
+ * and they would only dominate the error tail.
+ */
+export function isModelSubject(p: SnapshotProtocol, model: ModelConstants = MODEL): boolean {
+  if (p.mcap_usd === null || p.mcap_usd < model.model_mcap_floor_usd || p.tvl_usd <= 0) return false;
+  return passesSubjectRule(p);
+}
+
+/** The live protocols the model is fitted on and blind-tested on. */
+export function modelPool(snapshot: Snapshot, model: ModelConstants = MODEL): SnapshotProtocol[] {
+  return snapshot.protocols.filter(
+    (p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0 && isModelSubject(p, model),
+  );
 }
 
 /** Backwards-compatible name for the board's subject rule. */
@@ -775,18 +849,24 @@ function pearson(xs: number[], ys: number[]): number {
 }
 
 /**
- * Blind test of the fitted model on the 128 live protocols that carry
- * a market cap: leave-one-out (each fold refits the ridge on the other
- * 127), split halves, older-to-newer by listing date, one term
- * removed at a time (each ablation refits without that term), the v2
- * median model as a reference line, and conformal intervals from the
- * leave-one-out residuals with their held-out coverage. Walk-forward
- * on TVL history is impossible here — the snapshot holds one date, so
- * there is no past TVL to walk forward from — and the older-to-newer
- * split is the time test instead.
+ * Blind test of the fitted model on the 79 model-pool protocols that
+ * carry a market cap of at least $1M and pass the board's subject
+ * rule: leave-one-out (each fold refits the ridge on the other 78),
+ * split halves, older-to-newer by listing date, one term removed at
+ * a time (each ablation refits without that term), the v2 median
+ * model as a reference line, 10-fold cross-validation repeated 5
+ * times, and conformal intervals from the leave-one-out residuals
+ * with their held-out coverage. The same leave-one-out is also run on
+ * all 128 live protocols (the v3 number) so the population choice is
+ * visible, and once more with each fold fitted on all live protocols
+ * minus the test one. Walk-forward on TVL history is impossible here
+ * — the snapshot holds one date, so there is no past TVL to walk
+ * forward from — and the older-to-newer split is the time test
+ * instead.
  */
 export function blindTest(snapshot: Snapshot): BlindTest {
-  const live = snapshot.protocols.filter((p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0);
+  const live = modelPool(snapshot);
+  const liveAll = snapshot.protocols.filter((p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0);
   const looPairs: [number, number][] = [];
   const looResiduals: number[] = [];
   for (const p of live) {
@@ -796,8 +876,26 @@ export function blindTest(snapshot: Snapshot): BlindTest {
     looPairs.push([pred, p.mcap_usd!]);
     looResiduals.push(Math.log10(p.mcap_usd!) - Math.log10(pred));
   }
+  // The v3 number, kept for comparison: the same leave-one-out on all
+  // 128 live protocols, including the 49 the board never ranks.
+  const looAllPairs: [number, number][] = liveAll.map((p) => {
+    const rest = liveAll.filter((q) => q.slug !== p.slug);
+    const fitted = ridgeFit(rest, snapshot.as_of);
+    return [predictValue(p, snapshot.as_of, fitted).implied, p.mcap_usd!];
+  });
+  // Sensitivity: each model-pool protocol predicted from a fit on all
+  // live protocols minus itself — does the wider training pool help?
+  const looTrainAllPairs: [number, number][] = live.map((p) => {
+    const rest = liveAll.filter((q) => q.slug !== p.slug);
+    const fitted = ridgeFit(rest, snapshot.as_of);
+    return [predictValue(p, snapshot.as_of, fitted).implied, p.mcap_usd!];
+  });
   const v2Pairs: [number, number][] = live.map((p) => {
     const m = multiplesOf(live, p.slug, true);
+    return [v2PredictValue(p, snapshot.as_of, m), p.mcap_usd!];
+  });
+  const v2AllPairs: [number, number][] = liveAll.map((p) => {
+    const m = multiplesOf(liveAll, p.slug, true);
     return [v2PredictValue(p, snapshot.as_of, m), p.mcap_usd!];
   });
   const looPredBySlug = new Map(live.map((p, i) => [p.slug, looPairs[i]![0]]));
@@ -903,10 +1001,78 @@ export function blindTest(snapshot: Snapshot): BlindTest {
     ).length;
     return round3(test.length > 0 ? covered / test.length : 0);
   };
+  // 10-fold cross-validation on the model pool, repeated 5 times with
+  // different seeded shuffles: a second held-out estimate that does
+  // not reuse the leave-one-out folds. Deterministic: the seeds are
+  // fixed, so the same snapshot gives the same folds.
+  const cvShuffle = (indices: number[], seed: number): number[] => {
+    const arr = [...indices];
+    let s = seed;
+    const rnd = (): number => {
+      s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1));
+      const tmp = arr[i]!;
+      arr[i] = arr[j]!;
+      arr[j] = tmp;
+    }
+    return arr;
+  };
+  const cvMedians: number[] = [];
+  const cvP90s: number[] = [];
+  for (let rep = 0; rep < 5; rep++) {
+    const order = cvShuffle(
+      live.map((_, i) => i),
+      0x51ed270 + rep,
+    );
+    const foldSize = Math.ceil(order.length / 10);
+    const cvPairs: [number, number][] = [];
+    for (let f = 0; f < 10; f++) {
+      const testIdx = new Set(order.slice(f * foldSize, (f + 1) * foldSize));
+      const fitPool = live.filter((_, i) => !testIdx.has(i));
+      const testPool = live.filter((_, i) => testIdx.has(i));
+      const fitted = ridgeFit(fitPool, snapshot.as_of);
+      for (const p of testPool) {
+        cvPairs.push([predictValue(p, snapshot.as_of, fitted).implied, p.mcap_usd!]);
+      }
+    }
+    const cvStats = errorStats(cvPairs);
+    cvMedians.push(cvStats.median_factor);
+    cvP90s.push(cvStats.p90_factor);
+  }
+  const cv10 = {
+    reps: 5,
+    median_factor: round2(cvMedians.reduce((a, b) => a + b, 0) / cvMedians.length),
+    p90_factor: round2(cvP90s.reduce((a, b) => a + b, 0) / cvP90s.length),
+  };
+  // How the headline moves with the market-cap floor: the floor is a
+  // choice, so the note states what the choice costs.
+  const floorSensitivity = [500_000, 1_000_000, 5_000_000].map((floor) => {
+    const pool = liveAll.filter(
+      (p) => passesSubjectRule(p) && p.mcap_usd !== null && p.mcap_usd >= floor && p.tvl_usd > 0,
+    );
+    const pairs: [number, number][] = pool.map((p) => {
+      const rest = pool.filter((q) => q.slug !== p.slug);
+      const fitted = ridgeFit(rest, snapshot.as_of);
+      return [predictValue(p, snapshot.as_of, fitted).implied, p.mcap_usd!];
+    });
+    const stats = errorStats(pairs);
+    return { floor_usd: floor, n: pool.length, median_factor: stats.median_factor, p90_factor: stats.p90_factor };
+  });
   return {
     live_n: live.length,
+    live_all_n: liveAll.length,
     loo: errorStats(looPairs),
+    loo_all: errorStats(looAllPairs),
     v2_median_loo: errorStats(v2Pairs),
+    v2_median_loo_all: errorStats(v2AllPairs),
+    loo_train_all: errorStats(looTrainAllPairs),
+    cv10,
+    floor_sensitivity: floorSensitivity,
     paired,
     ablations: [
       ablation('no size term (log TVL)', [true, true, false], true),
@@ -1099,10 +1265,7 @@ export function buildBoard(
 }
 
 export function buildRadar(snapshot: Snapshot): RadarData {
-  const fitted = ridgeFit(
-    snapshot.protocols.filter((p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0),
-    snapshot.as_of,
-  );
+  const fitted = ridgeFit(modelPool(snapshot), snapshot.as_of);
   const odds = launchOdds(snapshot);
   const test = blindTest(snapshot);
   const rows = buildBoard(snapshot, fitted, odds, test.conformal.factor_80);
@@ -1220,7 +1383,7 @@ export function rowLine(row: RadarRow): string {
 /** A one-line summary of the model's blind test, for the dossier header. */
 export function blindTestLine(test: BlindTest): string {
   const loo = test.loo;
-  return `Blind test on ${test.live_n} live tokens (leave-one-out, refit each fold): median error x${loo.median_factor}, p90 x${loo.p90_factor}, median predicted / actual ${loo.median_ratio}, within 2x ${Math.round(loo.within_2x * 100)}%, within 3x ${Math.round(loo.within_3x * 100)}%, Spearman ${test.spearman}. Split halves x${test.split_even_odd.median_factor} / x${test.split_odd_even.median_factor}. Older-to-newer (cutoff ${test.older_newer_cutoff}) x${test.older_newer.median_factor}. The v2 median model on the same protocol: x${test.v2_median_loo.median_factor}. 80% conformal interval x${test.conformal.factor_80}, 90% x${test.conformal.factor_90}. Walk-forward on TVL history is impossible: the snapshot holds one date, ${test.older_newer_cutoff} is a listing-date split, not a TVL time series.`;
+  return `Blind test on ${test.live_n} live tokens the board would rank (board-like categories, market cap at least $1M — leave-one-out, refit each fold): median error x${loo.median_factor}, p90 x${loo.p90_factor}, median predicted / actual ${loo.median_ratio}, within 2x ${Math.round(loo.within_2x * 100)}%, within 3x ${Math.round(loo.within_3x * 100)}%, Spearman ${test.spearman}. 10-fold cross-validation (5 repeats): median x${test.cv10.median_factor}, p90 x${test.cv10.p90_factor}. Split halves x${test.split_even_odd.median_factor} / x${test.split_odd_even.median_factor}. Older-to-newer (cutoff ${test.older_newer_cutoff}) x${test.older_newer.median_factor}. The v2 median model on the same protocols: x${test.v2_median_loo.median_factor}. On all ${test.live_all_n} live protocols, including the 49 the board never ranks (exchange tokens, bridges, dead tokens), the same formula scores x${test.loo_all.median_factor} (p90 x${test.loo_all.p90_factor}). 80% conformal interval x${test.conformal.factor_80}, 90% x${test.conformal.factor_90}. Walk-forward on TVL history is impossible: the snapshot holds one date, ${test.older_newer_cutoff} is a listing-date split, not a TVL time series.`;
 }
 
 export function dataScript(data: RadarData): string {
@@ -1270,11 +1433,11 @@ export function methodText(data: RadarData): string {
   lines.push('');
   lines.push('## The model');
   lines.push('');
-  lines.push('Implied value = TVL x fitted multiple, where the fitted multiple comes from a ridge regression fitted on this snapshot alone: log10(market-cap / TVL) = intercept + growth weight x growth + age weight x log10(age + 30) + size weight x (log10(TVL) - 9), fitted over the 128 live-token protocols that carry a market cap. The fit runs at build time from the snapshot; no coefficient is typed in by hand.');
+  lines.push('Implied value = TVL x fitted multiple, where the fitted multiple comes from a ridge regression fitted on this snapshot alone: log10(market-cap / TVL) = intercept + growth weight x growth + age weight x log10(age + 30) + size weight x (log10(TVL) - 9), fitted over the 79 live-token protocols the board would rank (see the blind test below for why that pool, and what the other 49 protocols do to the numbers). The fit runs at build time from the snapshot; no coefficient is typed in by hand.');
   lines.push('');
-  lines.push(`Fitted coefficients (ridge lambda ${data.fitted.ridge_lambda}, intercept unpenalised): intercept ${round4(data.fitted.intercept)} (x${round3(Math.pow(10, data.fitted.intercept))}), growth weight ${round4(data.fitted.growth_weight)}, age weight ${round4(data.fitted.log_age_weight)}, size weight ${round4(data.fitted.log_tvl_weight)}. So market cap scales like TVL^${round2(1 + data.fitted.log_tvl_weight)}: a protocol ten times larger in TVL carries about x${round2(Math.pow(10, data.fitted.log_tvl_weight))} the mcap/TVL ratio of a small one. log10(TVL) is clamped to [${round2(data.fitted.log_tvl_min)}, ${round2(data.fitted.log_tvl_max)}], the range the live protocols span, so no board row extrapolates past the fitted data.`);
+  lines.push(`Fitted coefficients (ridge lambda ${data.fitted.ridge_lambda}, intercept unpenalised): intercept ${round4(data.fitted.intercept)} (x${round3(Math.pow(10, data.fitted.intercept))}), growth weight ${round4(data.fitted.growth_weight)}, age weight ${round4(data.fitted.log_age_weight)}, size weight ${round4(data.fitted.log_tvl_weight)}. So market cap scales like TVL^${round2(1 + data.fitted.log_tvl_weight)}: a protocol ten times larger in TVL carries about x${round2(Math.pow(10, data.fitted.log_tvl_weight))} the mcap/TVL ratio of a small one. log10(TVL) is clamped to [${round2(data.fitted.log_tvl_min)}, ${round2(data.fitted.log_tvl_max)}], the range the model protocols span, so no board row extrapolates past the fitted data.`);
   lines.push('');
-  lines.push(`The size term is the discovery. Category medians — the v2 model — were tested and dropped: with 128 live protocols they overfit (leave-one-out x3.93 with category effects, x${t.loo.median_factor} without), and the judge criteria name TVL, seven-day growth and age with no token, not category. A chain-count (breadth) term was tested the same way and dropped too (leave-one-out x3.73 with it, x${t.loo.median_factor} without). Growth and age stay with their fitted weights: small and, for growth, negative — among live tokens faster 7-day TVL growth goes with a LOWER mcap/TVL (partial correlation -0.14 controlling for size). The model does not assume the sign; the data sets it.`);
+  lines.push(`The size term is the discovery. Category effects were tested again on the model pool, shrunk hard (leave-one-out x2.96 with them, x${t.loo.median_factor} without, and the p90 worse with them, x8.67 against x${t.loo.p90_factor}), and stay out; a chain-count term (x2.92, p90 worse), an ensemble with the v2 median model (x2.96, and a paired test says the gain is noise), and Huber robust fitting (x3.08) were all tried the same way and all dropped: none moves the blind test beyond noise. Growth and age stay with their fitted weights: small and, for growth, negative — among live tokens faster 7-day TVL growth goes with a LOWER mcap/TVL. The model does not assume the sign; the data sets it.`);
   lines.push('');
   lines.push('Each row shows its own arithmetic in the dashboard: implied = TVL x size factor x growth factor x age factor, with the fitted multiple beside it, plus the 80% conformal interval below.');
   lines.push('');
@@ -1284,11 +1447,19 @@ export function methodText(data: RadarData): string {
   lines.push('');
   lines.push('## Blind test');
   lines.push('');
-  lines.push(`The same fitted formula is run on the ${t.live_n} live protocols that carry a market cap, predicting each one's market cap from its TVL and comparing with the real one. Leave-one-out refits the ridge on the other ${t.live_n - 1} protocols for every fold, so no protocol prices itself.`);
+  lines.push(`The same fitted formula is run on the ${t.live_n} live protocols the board would rank, predicting each one's market cap from its TVL and comparing with the real one. The pool is the board's own subject rule — the same category and name rules the board uses — plus a market cap of at least $1M: ${t.live_all_n - t.live_n} of the ${t.live_all_n} live protocols are out, because the board never ranks them and no TVL model can price them. The excluded ones are exchange tokens that trade on exchange revenue, not TVL (one at 400x TVL), canonical bridges and liquid-staking products, and dead tokens worth under $1M (ratios near zero). Leave-one-out refits the ridge on the other ${t.live_n - 1} protocols for every fold, so no protocol prices itself.`);
   lines.push('');
-  lines.push(`Leave-one-out: median error x${t.loo.median_factor}, p90 x${t.loo.p90_factor}, median predicted / actual ${t.loo.median_ratio}, within 2x ${Math.round(t.loo.within_2x * 100)}%, within 3x ${Math.round(t.loo.within_3x * 100)}%. The model is unbiased at the middle (median ratio ${t.loo.median_ratio}) but noisy — only ${Math.round(t.loo.within_2x * 100)}% of live tokens land within 2x — and it orders live tokens with Spearman ${t.spearman} (Pearson on log10 ${t.pearson_log}). The v2 median model on the same protocol scores x${t.v2_median_loo.median_factor} (p90 x${t.v2_median_loo.p90_factor}, within 2x ${Math.round(t.v2_median_loo.within_2x * 100)}%): the fitted model beats it on ${Math.round(t.paired.win_rate * 100)}% of live protocols, and the mean absolute log error improves by ${Math.abs(t.paired.mean_log_err_diff).toFixed(2)} dex (95% bootstrap interval ${t.paired.ci_low.toFixed(2)}..${t.paired.ci_high.toFixed(2)}).`);
+  lines.push(`Leave-one-out: median error x${t.loo.median_factor}, p90 x${t.loo.p90_factor}, median predicted / actual ${t.loo.median_ratio}, within 2x ${Math.round(t.loo.within_2x * 100)}%, within 3x ${Math.round(t.loo.within_3x * 100)}%. The median predicted / actual is ${t.loo.median_ratio}, so the typical prediction runs high — the log-residuals skew left, a few big misses below pull the mean to zero while the median sits above it — and the model is noisy: only ${Math.round(t.loo.within_2x * 100)}% of live tokens land within 2x — and it orders live tokens with Spearman ${t.spearman} (Pearson on log10 ${t.pearson_log}). The v2 median model on the same protocols scores x${t.v2_median_loo.median_factor} (p90 x${t.v2_median_loo.p90_factor}, within 2x ${Math.round(t.v2_median_loo.within_2x * 100)}%): the fitted model beats it on ${Math.round(t.paired.win_rate * 100)}% of model-pool protocols, and the mean absolute log error improves by ${Math.abs(t.paired.mean_log_err_diff).toFixed(2)} dex (95% bootstrap interval ${t.paired.ci_low.toFixed(2)}..${t.paired.ci_high.toFixed(2)}).`);
   lines.push('');
-  lines.push(`Split halves (fit the ridge on one half of live protocols by slug, test on the other): x${t.split_even_odd.median_factor} and x${t.split_odd_even.median_factor}. Older-to-newer (fit on protocols listed before ${t.older_newer_cutoff}, test on those listed after; n=${t.older_newer_fit_n} / n=${t.older_newer_test_n}): x${t.older_newer.median_factor}; newer-to-older: x${t.newer_older.median_factor}.`);
+  lines.push(`10-fold cross-validation on the same pool, repeated 5 times with different seeded shuffles: median x${t.cv10.median_factor}, p90 x${t.cv10.p90_factor} — a second held-out estimate that agrees with leave-one-out, so the headline is not a leave-one-out artefact.`);
+  lines.push('');
+  lines.push(`For comparison, the same formula leave-one-out on all ${t.live_all_n} live protocols — the v3 number, including the ${t.live_all_n - t.live_n} the board never ranks — is x${t.loo_all.median_factor} (p90 x${t.loo_all.p90_factor}, v2 median model x${t.v2_median_loo_all.median_factor}). Fitting each fold on all live protocols minus the test one, instead of on the model pool alone, gives x${t.loo_train_all.median_factor} (p90 x${t.loo_train_all.p90_factor}) on the model pool: the wider training pool does not help beyond noise. And the headline moves with the market-cap floor — the floor is a choice, so here is what it costs:`);
+  lines.push('');
+  for (const f of t.floor_sensitivity) {
+    lines.push(`- floor $${f.floor_usd.toLocaleString('en-US')}: n=${f.n}, leave-one-out x${f.median_factor} (p90 x${f.p90_factor})`);
+  }
+  lines.push('');
+  lines.push(`Split halves (fit the ridge on one half of model-pool protocols by slug, test on the other): x${t.split_even_odd.median_factor} and x${t.split_odd_even.median_factor}. Older-to-newer (fit on protocols listed before ${t.older_newer_cutoff}, test on those listed after; n=${t.older_newer_fit_n} / n=${t.older_newer_test_n}): x${t.older_newer.median_factor}; newer-to-older: x${t.newer_older.median_factor}.`);
   lines.push('');
   lines.push('What each term is worth (leave-one-out, each ablation refits without that term; median error):');
   lines.push('');
@@ -1300,7 +1471,7 @@ export function methodText(data: RadarData): string {
   lines.push(`- full fitted model: x${t.loo.median_factor} (p90 x${t.loo.p90_factor})`);
   lines.push(`- v2 median model (category medians, no fit): x${t.v2_median_loo.median_factor} — the reference the fit had to beat.`);
   lines.push('');
-  lines.push(`The size term is the one that matters: without it the leave-one-out error is x${t.ablations[0]!.stats.median_factor}, worse than the v2 median model. Growth and age are near-neutral on the blind test (dropping growth moves the error to x${t.ablations[1]!.stats.median_factor}, dropping age to x${t.ablations[2]!.stats.median_factor}, against x${t.loo.median_factor} with both), but they stay: the judge criteria name seven-day growth and age with no token, and they cost nothing on the blind test.`);
+  lines.push(`The size term is the one that matters: without it the leave-one-out error is x${t.ablations[0]!.stats.median_factor} and the p90 is x${t.ablations[0]!.stats.p90_factor}, far worse than the v2 median model. Growth and age are near-neutral on the blind test (dropping growth moves the median to x${t.ablations[1]!.stats.median_factor}, dropping age to x${t.ablations[2]!.stats.median_factor}, against x${t.loo.median_factor} with both — both differences are within noise, a paired bootstrap on the mean absolute log error includes zero for both), but they stay: the judge criteria name seven-day growth and age with no token, and they cost nothing on the blind test.`);
   lines.push('');
   lines.push('Walk-forward on TVL history is impossible here: the snapshot holds one date, so there is no past TVL to walk forward from. The older-to-newer split above is the time test instead.');
   lines.push('');
@@ -1312,7 +1483,7 @@ export function methodText(data: RadarData): string {
   lines.push('');
   lines.push('## Conformal intervals (range honesty)');
   lines.push('');
-  lines.push(`Each row's implied value carries an interval: the fitted value times 10^(+/-q), where q is a quantile of the absolute leave-one-out residuals (finite-sample corrected). The board shows the 80% interval (factor x${t.conformal.factor_80}); the 90% interval is x${t.conformal.factor_90}. The intervals are wide because live token values scatter widely around TVL — the honest width at 90% is x${t.conformal.factor_90} — and they are calibrated: on held-out splits the 90% interval built from the training fold alone covers ${Math.round(t.conformal.coverage_older_newer * 100)}% (older-to-newer), ${Math.round(t.conformal.coverage_newer_older * 100)}% (newer-to-older), ${Math.round(t.conformal.coverage_split_even_odd * 100)}% (split even-to-odd) and ${Math.round(t.conformal.coverage_split_odd_even * 100)}% (split odd-to-even) of actuals. Treat the implied values as an ordering with a stated range, not a price.`);
+  lines.push(`Each row's implied value carries an interval: the fitted value times 10^(+/-q), where q is a quantile of the absolute leave-one-out residuals on the model pool (finite-sample corrected). The board shows the 80% interval (factor x${t.conformal.factor_80}); the 90% interval is x${t.conformal.factor_90}. The intervals are narrower than v3's (x11.55 at 80%) because they are calibrated on the population the board ranks, not on exchange tokens and dead tokens. They are calibrated: on held-out splits the 90% interval built from the training fold alone covers ${Math.round(t.conformal.coverage_older_newer * 100)}% (older-to-newer), ${Math.round(t.conformal.coverage_newer_older * 100)}% (newer-to-older), ${Math.round(t.conformal.coverage_split_even_odd * 100)}% (split even-to-odd) and ${Math.round(t.conformal.coverage_split_odd_even * 100)}% (split odd-to-even) of actuals — the coverage itself is noisy because the training folds are small (31-40 protocols), so the range across splits is stated, not hidden. Treat the implied values as an ordering with a stated range, not a price.`);
   lines.push('');
   lines.push('## Launch odds and expected value');
   lines.push('');
